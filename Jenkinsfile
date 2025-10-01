@@ -55,7 +55,7 @@ pipeline {
         stage('Run Ansible Playbook') {
             steps {
                 sh '''
-                    ansible-playbook -i ${INVENTORY_DIR}/inventory.ini frontend/playbook.yml
+                    ansible-playbook -i ${INVENTORY_DIR}/inventory.ini frontend/deploy_playbook.yml
                 '''
             }
         }
