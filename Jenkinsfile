@@ -1,18 +1,18 @@
 pipeline {
     agent any
-
     environment {
-        AWS_REGION = 'us-east-1' // change if needed
+        AWS_REGION = 'us-east-1'  // set your region
     }
-
     stages {
 
         stage('Checkout SCM') {
             steps {
                 checkout([$class: 'GitSCM', 
-                    branches: [[name: '*/main']],
+                    branches: [[name: '*/main']], 
+                    doGenerateSubmoduleConfigurations: false, 
+                    extensions: [], 
                     userRemoteConfigs: [[
-                        url: 'https://github.com/Muhammad-Harris-25/aws-infra-deploy.git',
+                        url: 'https://github.com/Muhammad-Harris-25/aws-infra-deploy.git', 
                         credentialsId: 'github_pat'
                     ]]
                 ])
@@ -51,22 +51,19 @@ pipeline {
 
         stage('Generate Ansible Inventory') {
             steps {
-                dir('terraform') {
-                    sh '''
-                        mkdir -p ../ansible
-                        ./gen_inventory.sh ../ansible/inventory.ini
-                    '''
-                }
+                // Run from root so gen_inventory.sh is found
+                sh '''
+                    mkdir -p ansible
+                    ./gen_inventory.sh ansible/inventory.ini
+                '''
             }
         }
 
         stage('Run Ansible Playbook') {
             steps {
-                dir('ansible') {
-                    sh '''
-                        ansible-playbook -i inventory.ini playbook.yml
-                    '''
-                }
+                sh '''
+                    ansible-playbook -i ansible/inventory.ini playbook.yml
+                '''
             }
         }
     }
