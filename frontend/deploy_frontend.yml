@@ -1,29 +1,61 @@
+---
 - hosts: web
   become: yes
+  gather_facts: yes
+
   tasks:
     - name: Ping host
-      ping:
+      ansible.builtin.ping:
 
-    - name: Update apt cache (Ubuntu) or skip if Amazon Linux
+    - name: Update apt cache (Ubuntu/Debian)
       when: ansible_facts['os_family'] == "Debian"
-      apt:
+      ansible.builtin.apt:
         update_cache: yes
         cache_valid_time: 3600
 
     - name: Install nginx (Debian/Ubuntu)
       when: ansible_facts['os_family'] == "Debian"
-      apt:
+      ansible.builtin.apt:
         name: nginx
         state: present
+      register: nginx_install_result
+      retries: 2
+      delay: 3
+      until: nginx_install_result is succeeded
 
-    - name: Install nginx (RedHat/Amazon)
-      when: ansible_facts['os_family'] == "RedHat"
-      yum:
-        name: nginx
-        state: present
+    - name: Wait for apt/dpkg to settle (best-effort)
+      when: nginx_install_result is defined
+      ansible.builtin.wait_for:
+        path: /var/lib/dpkg/lock-frontend
+        state: absent
+        timeout: 30
+      ignore_errors: true
 
-    - name: Ensure nginx is started and enabled
-      service:
+    - name: Reload systemd daemon (in case unit files appeared)
+      ansible.builtin.shell: systemctl daemon-reload || true
+      changed_when: false
+
+    - name: Start and enable nginx service
+      ansible.builtin.service:
         name: nginx
         state: started
         enabled: yes
+      register: nginx_service
+      retries: 3
+      delay: 3
+      until: nginx_service is succeeded
+
+    - name: Verify nginx binary exists
+      ansible.builtin.command: which nginx
+      register: nginx_bin
+      failed_when: nginx_bin.rc != 0
+      changed_when: false
+
+    - name: Show nginx status (for debugging)
+      ansible.builtin.shell: systemctl status nginx --no-pager --full || true
+      register: nginx_status
+      changed_when: false
+
+    - name: Print nginx status stdout
+      ansible.builtin.debug:
+        var: nginx_status.stdout_lines
