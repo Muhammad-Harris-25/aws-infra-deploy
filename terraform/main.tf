@@ -1,31 +1,21 @@
-provider "aws" {
-  region = "eu-north-1"
-}
-
-variable "ami_id" {
-  # Ubuntu 22.04 LTS AMI in eu-north-1 (default)
-  default = "ami-0a716d3f3b16d290c"
-}
-
-variable "instance_type" {
-  default = "t3.micro"
-}
-
-# Use an existing public key file (safe for CI)
+# Use existing key pair (do not force create)
 resource "aws_key_pair" "deployer" {
-  key_name   = "jenkins-key"
-  public_key = file("${path.module}/../keys/jenkins_deploy_key.pub")
+  key_name = "jenkins-key"  # Already exists in AWS
+  # remove 'public_key' if already imported
 }
 
+# Use existing security group
 resource "aws_security_group" "web_sg" {
   name        = "web-sg"
-  description = "Allow SSH and HTTP"
+  description = "Allow web traffic"
+  vpc_id      = "vpc-0ee0b1e9385206793"  # replace with your VPC ID
 
+  # Example ingress rules (optional)
   ingress {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # tighten for production
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
@@ -43,12 +33,12 @@ resource "aws_security_group" "web_sg" {
   }
 }
 
+# Your EC2 instances
 resource "aws_instance" "web" {
   count         = 2
-  ami           = var.ami_id
-  instance_type = var.instance_type
+  ami           = "ami-0a716d3f3b16d290c"
+  instance_type = "t3.micro"
   key_name      = aws_key_pair.deployer.key_name
-
   vpc_security_group_ids = [aws_security_group.web_sg.id]
 
   tags = {
