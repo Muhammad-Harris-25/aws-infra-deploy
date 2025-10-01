@@ -1,21 +1,13 @@
 pipeline {
     agent any
-
     environment {
-        TF_DIR = 'terraform'  // your Terraform directory
-        AWS_REGION = 'eu-north-1'
+        TERRAFORM_DIR = 'terraform'
+        INVENTORY_FILE = 'ansible/inventory.ini'
     }
-
-    options {
-        timestamps()
-        ansiColor('xterm')
-    }
-
     stages {
-        stage('Checkout') {
+        stage('Checkout SCM') {
             steps {
-                checkout([
-                    $class: 'GitSCM', 
+                checkout([$class: 'GitSCM', 
                     branches: [[name: '*/main']], 
                     userRemoteConfigs: [[
                         url: 'https://github.com/Muhammad-Harris-25/aws-infra-deploy.git',
@@ -28,7 +20,6 @@ pipeline {
         stage('Validate Tools') {
             steps {
                 sh '''
-                    #!/bin/bash
                     terraform -v
                     aws --version
                     ansible --version
@@ -38,61 +29,52 @@ pipeline {
         }
 
         stage('Terraform Init & Apply') {
-            environment {
-                AWS_ACCESS_KEY_ID = credentials('aws_access_key')
-                AWS_SECRET_ACCESS_KEY = credentials('aws_secret_key')
-            }
             steps {
-                dir("${TF_DIR}") {
+                // AWS credentials from Jenkins
+                withCredentials([usernamePassword(credentialsId: 'aws-creds',
+                                                 usernameVariable: 'AWS_ACCESS_KEY_ID',
+                                                 passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                    dir(TERRAFORM_DIR) {
+                        sh '''
+                            echo "Using AWS Key: $AWS_ACCESS_KEY_ID"
+                            terraform init
+                            terraform plan -out=tfplan
+                            terraform apply -auto-approve tfplan
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Generate Ansible Inventory') {
+            steps {
+                dir(TERRAFORM_DIR) {
+                    // Generate dynamic inventory from Terraform output
                     sh '''
-                        #!/bin/bash
-                        set -euo pipefail
-
-                        terraform init -input=false
-                        terraform plan -out=tfplan -input=false
-                        terraform apply -auto-approve tfplan
-
-                        terraform output -json > ${WORKSPACE}/tf-output.json
+                        terraform output -json > tf-output.json
+                        jq -r '.instance_public_ips.value[]' tf-output.json > ../ansible/inventory.ini
                     '''
                 }
             }
         }
 
-        stage('Generate Inventory') {
+        stage('Run Ansible Playbook') {
             steps {
-                sh '''
-                    #!/bin/bash
-                    if [[ -f "${WORKSPACE}/tf-output.json" ]]; then
-                        jq -r '.instance_public_ips.value[]' ${WORKSPACE}/tf-output.json > ${WORKSPACE}/inventory.ini
-                        echo "Inventory generated:"
-                        cat ${WORKSPACE}/inventory.ini
-                    else
-                        echo "Terraform output file not found!"
-                        exit 1
-                    fi
-                '''
-            }
-        }
-
-        stage('Run Ansible') {
-            steps {
-                sh '''
-                    #!/bin/bash
-                    ansible-playbook -i ${WORKSPACE}/inventory.ini ../playbook.yml
-                '''
+                dir('ansible') {
+                    sh '''
+                        ansible-playbook -i inventory.ini site.yml
+                    '''
+                }
             }
         }
     }
 
     post {
-        always {
-            echo "Pipeline finished!"
-        }
         success {
-            echo "Deployment succeeded."
+            echo 'Deployment completed successfully!'
         }
         failure {
-            echo "Deployment failed. Check the logs."
+            echo 'Deployment failed. Check the logs!'
         }
     }
 }
