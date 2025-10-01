@@ -1,0 +1,10 @@
+# Ignore private keys and generated PEMs
+keys/jenkins_deploy_key
+terraform-key*.pem
+.tfstate*
+.tfstate*
+*.tfplan
+*.retry
+.terraform/
+tf-output.json
+inventory.ini

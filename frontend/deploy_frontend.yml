@@ -1,0 +1,29 @@
+- hosts: web
+  become: yes
+  tasks:
+    - name: Ping host
+      ping:
+
+    - name: Update apt cache (Ubuntu) or skip if Amazon Linux
+      when: ansible_facts['os_family'] == "Debian"
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install nginx (Debian/Ubuntu)
+      when: ansible_facts['os_family'] == "Debian"
+      apt:
+        name: nginx
+        state: present
+
+    - name: Install nginx (RedHat/Amazon)
+      when: ansible_facts['os_family'] == "RedHat"
+      yum:
+        name: nginx
+        state: present
+
+    - name: Ensure nginx is started and enabled
+      service:
+        name: nginx
+        state: started
+        enabled: yes
