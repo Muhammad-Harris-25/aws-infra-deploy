@@ -30,7 +30,7 @@ EOF
 
 for ip in $IPS; do
   # change ansible_user if using ubuntu AMI
-  echo "${ip} ansible_user=ec2-user" >> "$OUT"
+  echo "${ip} ansible_user=ubuntu" >> "$OUT"
 done
 
 echo "Inventory generated at $OUT"
