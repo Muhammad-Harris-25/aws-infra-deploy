@@ -1,83 +1,98 @@
 pipeline {
-  agent any
+    agent any
 
-  environment {
-    TF_DIR       = 'terraform'
-    INVENTORY    = 'inventory.ini'
-    ANSIBLE_PLAY = 'frontend/deploy_frontend.yml'
-    AWS_REGION   = 'eu-north-1'
-  }
-
-  options {
-    ansiColor('xterm')
-    timestamps()
-  }
-
-  stages {
-    stage('Checkout') {
-      steps { checkout scm }
+    environment {
+        TF_DIR = 'terraform'  // your Terraform directory
+        AWS_REGION = 'eu-north-1'
     }
 
-    stage('Validate tools') {
-      steps {
-        sh '''
-          terraform -v || true
-          aws --version || true
-          jq --version || true
-          ansible --version || true
-        '''
-      }
+    options {
+        timestamps()
+        ansiColor('xterm')
     }
 
-    stage('Terraform Apply') {
-      steps {
-        withCredentials([usernamePassword(credentialsId: 'aws-creds',
-                                         usernameVariable: 'AWS_ACCESS_KEY_ID',
-                                         passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-          dir(env.TF_DIR) {
-            sh '''
-              #!/bin/bash
-              set -euo pipefail
-              export AWS_REGION=${AWS_REGION}
-              export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-              export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-
-              terraform init -input=false
-              terraform apply -auto-approve -input=false
-
-              terraform output -json > ${WORKSPACE}/tf-output.json
-            '''
-          }
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout([
+                    $class: 'GitSCM', 
+                    branches: [[name: '*/main']], 
+                    userRemoteConfigs: [[
+                        url: 'https://github.com/Muhammad-Harris-25/aws-infra-deploy.git',
+                        credentialsId: 'github_pat'
+                    ]]
+                ])
+            }
         }
-      }
-    }
 
-    stage('Generate Inventory') {
-      steps {
-        sh '''
-          #!/bin/bash
-          chmod +x ./scripts/gen_inventory.sh
-          ./scripts/gen_inventory.sh ${TF_DIR} ${INVENTORY}
-          echo "----- inventory -----"
-          cat ${INVENTORY}
-        '''
-      }
-    }
-
-    stage('Run Ansible') {
-      steps {
-        withCredentials([sshUserPrivateKey(credentialsId: 'jenkins-ssh-key', keyFileVariable: 'SSH_KEY')]) {
-          sh '''
-            #!/bin/bash
-            ansible-playbook -i ${INVENTORY} ${ANSIBLE_PLAY} --private-key $SSH_KEY -u ubuntu -o StrictHostKeyChecking=no
-          '''
+        stage('Validate Tools') {
+            steps {
+                sh '''
+                    #!/bin/bash
+                    terraform -v
+                    aws --version
+                    ansible --version
+                    jq --version
+                '''
+            }
         }
-      }
-    }
-  }
 
-  post {
-    success { echo "Pipeline completed successfully." }
-    failure { echo "Pipeline failed. Inspect console output." }
-  }
+        stage('Terraform Init & Apply') {
+            environment {
+                AWS_ACCESS_KEY_ID = credentials('aws_access_key')
+                AWS_SECRET_ACCESS_KEY = credentials('aws_secret_key')
+            }
+            steps {
+                dir("${TF_DIR}") {
+                    sh '''
+                        #!/bin/bash
+                        set -euo pipefail
+
+                        terraform init -input=false
+                        terraform plan -out=tfplan -input=false
+                        terraform apply -auto-approve tfplan
+
+                        terraform output -json > ${WORKSPACE}/tf-output.json
+                    '''
+                }
+            }
+        }
+
+        stage('Generate Inventory') {
+            steps {
+                sh '''
+                    #!/bin/bash
+                    if [[ -f "${WORKSPACE}/tf-output.json" ]]; then
+                        jq -r '.instance_public_ips.value[]' ${WORKSPACE}/tf-output.json > ${WORKSPACE}/inventory.ini
+                        echo "Inventory generated:"
+                        cat ${WORKSPACE}/inventory.ini
+                    else
+                        echo "Terraform output file not found!"
+                        exit 1
+                    fi
+                '''
+            }
+        }
+
+        stage('Run Ansible') {
+            steps {
+                sh '''
+                    #!/bin/bash
+                    ansible-playbook -i ${WORKSPACE}/inventory.ini ../playbook.yml
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            echo "Pipeline finished!"
+        }
+        success {
+            echo "Deployment succeeded."
+        }
+        failure {
+            echo "Deployment failed. Check the logs."
+        }
+    }
 }
