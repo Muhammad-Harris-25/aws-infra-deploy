@@ -2,13 +2,12 @@ pipeline {
     agent any
 
     environment {
-        // AWS credentials stored in Jenkins
-        AWS_ACCESS_KEY_ID = ''
-        AWS_SECRET_ACCESS_KEY = ''
+        // Add any global environment variables here if needed
+        TF_DIR = "terraform"
+        INVENTORY_DIR = "ansible"
     }
 
     stages {
-
         stage('Checkout SCM') {
             steps {
                 checkout scm
@@ -28,12 +27,10 @@ pipeline {
 
         stage('Terraform Init & Apply') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'aws-creds',
-                    usernameVariable: 'AWS_ACCESS_KEY_ID',
-                    passwordVariable: 'AWS_SECRET_ACCESS_KEY'
-                )]) {
-                    dir('terraform') {
+                withCredentials([usernamePassword(credentialsId: 'aws-creds',
+                                                 usernameVariable: 'AWS_ACCESS_KEY_ID',
+                                                 passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                    dir("${TF_DIR}") {
                         sh '''
                             echo "Using AWS Key: $AWS_ACCESS_KEY_ID"
                             terraform init
@@ -49,8 +46,8 @@ pipeline {
             steps {
                 sh '''
                     chmod +x scripts/gen_inventory.sh
-                    mkdir -p ansible
-                    scripts/gen_inventory.sh ansible/inventory.ini
+                    mkdir -p ${INVENTORY_DIR}
+                    scripts/gen_inventory.sh ${INVENTORY_DIR}/inventory.ini
                 '''
             }
         }
@@ -58,7 +55,7 @@ pipeline {
         stage('Run Ansible Playbook') {
             steps {
                 sh '''
-                    ansible-playbook -i ansible/inventory.ini ansible/playbook.yml
+                    ansible-playbook -i ${INVENTORY_DIR}/inventory.ini frontend/playbook.yml
                 '''
             }
         }
