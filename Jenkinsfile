@@ -2,10 +2,10 @@ pipeline {
   agent any
 
   environment {
-    TF_DIR        = 'terraform'
-    INVENTORY     = 'inventory.ini'
-    ANSIBLE_PLAY  = 'frontend/deploy_frontend.yml'
-    AWS_REGION    = 'eu-north-1'   // change if you prefer another region
+    TF_DIR       = 'terraform'
+    INVENTORY    = 'inventory.ini'
+    ANSIBLE_PLAY = 'frontend/deploy_frontend.yml'
+    AWS_REGION   = 'eu-north-1'
   }
 
   options {
@@ -15,14 +15,12 @@ pipeline {
 
   stages {
     stage('Checkout') {
-      steps {
-        checkout scm
-      }
+      steps { checkout scm }
     }
 
-    stage('Validate Tools') {
+    stage('Validate tools') {
       steps {
-        sh '''#!/bin/bash
+        sh '''
           terraform -v || true
           aws --version || true
           jq --version || true
@@ -37,9 +35,9 @@ pipeline {
                                          usernameVariable: 'AWS_ACCESS_KEY_ID',
                                          passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
           dir(env.TF_DIR) {
-            sh '''#!/bin/bash
+            sh '''
+              #!/bin/bash
               set -euo pipefail
-
               export AWS_REGION=${AWS_REGION}
               export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
               export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
@@ -47,7 +45,6 @@ pipeline {
               terraform init -input=false
               terraform apply -auto-approve -input=false
 
-              # export outputs for next stages
               terraform output -json > ${WORKSPACE}/tf-output.json
             '''
           }
@@ -57,7 +54,8 @@ pipeline {
 
     stage('Generate Inventory') {
       steps {
-        sh '''#!/bin/bash
+        sh '''
+          #!/bin/bash
           chmod +x ./scripts/gen_inventory.sh
           ./scripts/gen_inventory.sh ${TF_DIR} ${INVENTORY}
           echo "----- inventory -----"
@@ -68,9 +66,10 @@ pipeline {
 
     stage('Run Ansible') {
       steps {
-        sshagent (credentials: ['jenkins-ssh-key']) {
-          sh '''#!/bin/bash
-            ansible-playbook -i ${INVENTORY} ${ANSIBLE_PLAY} --ssh-extra-args='-o StrictHostKeyChecking=no'
+        withCredentials([sshUserPrivateKey(credentialsId: 'jenkins-ssh-key', keyFileVariable: 'SSH_KEY')]) {
+          sh '''
+            #!/bin/bash
+            ansible-playbook -i ${INVENTORY} ${ANSIBLE_PLAY} --private-key $SSH_KEY -u ubuntu -o StrictHostKeyChecking=no
           '''
         }
       }
@@ -78,11 +77,7 @@ pipeline {
   }
 
   post {
-    success {
-      echo "Pipeline completed successfully."
-    }
-    failure {
-      echo "Pipeline failed. Inspect console output."
-    }
+    success { echo "Pipeline completed successfully." }
+    failure { echo "Pipeline failed. Inspect console output." }
   }
 }
