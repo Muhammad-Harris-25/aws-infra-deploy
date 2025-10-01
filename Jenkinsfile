@@ -1,21 +1,17 @@
 pipeline {
     agent any
+
     environment {
-        AWS_REGION = 'us-east-1'  // set your region
+        // AWS credentials stored in Jenkins
+        AWS_ACCESS_KEY_ID = ''
+        AWS_SECRET_ACCESS_KEY = ''
     }
+
     stages {
 
         stage('Checkout SCM') {
             steps {
-                checkout([$class: 'GitSCM', 
-                    branches: [[name: '*/main']], 
-                    doGenerateSubmoduleConfigurations: false, 
-                    extensions: [], 
-                    userRemoteConfigs: [[
-                        url: 'https://github.com/Muhammad-Harris-25/aws-infra-deploy.git', 
-                        credentialsId: 'github_pat'
-                    ]]
-                ])
+                checkout scm
             }
         }
 
@@ -51,10 +47,10 @@ pipeline {
 
         stage('Generate Ansible Inventory') {
             steps {
-                // Run from root so gen_inventory.sh is found
                 sh '''
+                    chmod +x scripts/gen_inventory.sh
                     mkdir -p ansible
-                    ./gen_inventory.sh ansible/inventory.ini
+                    scripts/gen_inventory.sh ansible/inventory.ini
                 '''
             }
         }
@@ -62,7 +58,7 @@ pipeline {
         stage('Run Ansible Playbook') {
             steps {
                 sh '''
-                    ansible-playbook -i ansible/inventory.ini playbook.yml
+                    ansible-playbook -i ansible/inventory.ini ansible/playbook.yml
                 '''
             }
         }
