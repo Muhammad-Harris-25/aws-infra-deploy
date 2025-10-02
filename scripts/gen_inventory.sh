@@ -1,36 +1,42 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-TF_DIR="${1:-terraform}"
-OUT="${2:-inventory.ini}"
+OUT="$1"   # e.g. ansible/inventory.ini
 
-# Prefer pre-generated tf-output.json in workspace root (Jenkins writes this)
-if [ -f "${WORKSPACE:-.}/tf-output.json" ]; then
-  TFJSON="${WORKSPACE:-.}/tf-output.json"
-else
-  (cd "$TF_DIR" && terraform output -json) > /tmp/tf-output.json
-  TFJSON=/tmp/tf-output.json
-fi
+# Where terraform output is expected
+TF_JSON="${WORKSPACE:-.}/terraform/tf-output.json"
 
-KEY="instance_public_ips"
-
-# Parse IPs
-IPS=$(jq -r --arg k "$KEY" '.[$k].value[]? // empty' "$TFJSON" || true)
-
-if [ -z "$IPS" ]; then
-  echo "ERROR: No IPs found under key '$KEY' in $TFJSON"
-  echo "Contents of $TFJSON:"
-  sed -n '1,200p' "$TFJSON" || true
+if [ ! -f "$TF_JSON" ]; then
+  echo "ERROR: terraform output file not found: $TF_JSON" >&2
   exit 2
 fi
 
-cat > "$OUT" <<EOF
-[web]
-EOF
+# Read the instance_public_ips array (jq required)
+if ! command -v jq >/dev/null 2>&1; then
+  echo "ERROR: jq is required but not installed" >&2
+  exit 3
+fi
 
-for ip in $IPS; do
-  # change ansible_user if using ubuntu AMI
-  echo "${ip} ansible_user=ubuntu" >> "$OUT"
-done
+IPS=$(jq -r '.instance_public_ips.value[]? // empty' "$TF_JSON")
+
+if [ -z "$IPS" ]; then
+  echo "ERROR: No instance_public_ips found in $TF_JSON" >&2
+  exit 4
+fi
+
+# Ensure destination dir exists
+mkdir -p "$(dirname "$OUT")"
+
+# Build INI inventory
+# Group name used in your playbook: [web]
+{
+  echo "[web]"
+  for ip in $IPS; do
+    # default ansible_user and ansible_ssh_private_key_file are intentionally omitted;
+    # your Jenkinsfile/ansible command should pass the private key and user or inventory can include it.
+    echo "${ip} ansible_user=ubuntu"
+  done
+} > "$OUT"
 
 echo "Inventory generated at $OUT"
+exit 0
